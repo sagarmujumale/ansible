@@ -84,7 +84,7 @@
         password: "{{ mysql_root_password }}"
         host: "{{ ansible_hostname }}"
         login_user: root
-        login_password: ""
+        login_password: "{{ mysql_root_password }}"
         login_host: localhost
         state: present
       when: "'databases' in group_names"
@@ -92,36 +92,30 @@
     - name: Create MySQL database and user
       mysql_db:
         name: students_db
-        state: present
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+      ignore_errors: yes  # Ignore errors if the database already exists
       when: "'databases' in group_names"
 
     - name: Create MySQL user for the sample website
-      shell: mysql -u root -p {{ mysql_root_password }} -e "CREATE USER 'sample_user'@'%' IDENTIFIED BY '{{ sample_user_password }}'; GRANT ALL PRIVILEGES ON students_db.* TO 'sample_user'@'%';"
-      ignore_errors: yes  # Ignore errors if the user already exists
+      mysql_user:
+        name: sample_user
+        password: "{{ sample_user_password }}"
+        priv: "students_db.*:ALL"
+        host: "%"
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
       when: "'databases' in group_names"
 
-    # Grant access to sample_user from server2.sagar.com
+
     - name: Grant access to sample_user from server2.sagar.com
       mysql_user:
         name: sample_user
+        password: "{{ sample_user_password }}"
         priv: "students_db.*:ALL"
         host: "server2.sagar.com"
         login_user: root
         login_password: "{{ mysql_root_password }}"
-        login_host: "{{ ansible_hostname }}"
-        state: present
-      when: "'databases' in group_names"
-
-    # Grant access to sample_user from localhost as a fallback option
-    - name: Grant access to sample_user from localhost
-      mysql_user:
-        name: sample_user
-        priv: "students_db.*:ALL"
-        host: "localhost"
-        login_user: root
-        login_password: "{{ mysql_root_password }}"
-        login_host: "{{ ansible_hostname }}"
-        state: present
       when: "'databases' in group_names"
 
     - name: Restart httpd service
