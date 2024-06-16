@@ -3,6 +3,12 @@
 - name: Install httpd on webservers and mysql on database servers
   hosts: production
   become: yes
+  become_user: "{{ ansible_become_user }}"
+  vars_prompt:
+    - name: "ansible_become_pass"
+      prompt: "Enter become password"
+      private: yes
+      ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
   tasks:
     - name: Install httpd on webservers
       yum:
