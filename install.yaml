@@ -3,7 +3,7 @@
 - name: Install httpd on webservers and mysql on database servers
   hosts: production
   become: yes
-  become_user: "{{ ansible_become_user }}"
+  become_user: root
   vars:
     ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
   tasks:
