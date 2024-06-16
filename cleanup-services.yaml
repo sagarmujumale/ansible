@@ -1,0 +1,32 @@
+# Playbook: cleanup_services.yml
+
+- name: Clean up httpd on webservers and mysql on database servers
+  hosts: production
+  become: yes
+  tasks:
+    - name: Stop and disable httpd on webservers
+      service:
+        name: httpd
+        state: stopped
+        enabled: no
+      when: "'webservers' in group_names"
+
+    - name: Remove httpd package from webservers
+      yum:
+        name: httpd
+        state: absent
+      when: "'webservers' in group_names"
+
+    - name: Stop and disable MySQL on database servers
+      service:
+        name: mysqld
+        state: stopped
+        enabled: no
+      when: "'databases' in group_names"
+
+    - name: Remove MySQL package from database servers
+      yum:
+        name: mysql-server
+        state: absent
+      when: "'databases' in group_names"
+

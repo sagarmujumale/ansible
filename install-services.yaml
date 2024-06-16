@@ -1,0 +1,32 @@
+# Playbook: install_services.yml
+
+- name: Install httpd on webservers and mysql on database servers
+  hosts: production
+  become: yes
+  tasks:
+    - name: Install httpd on webservers
+      yum:
+        name: httpd
+        state: present
+      when: "'webservers' in group_names"
+
+    - name: Ensure httpd is started and enabled on webservers
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+      when: "'webservers' in group_names"
+
+    - name: Install MySQL on database servers
+      yum:
+        name: mysql-server
+        state: present
+      when: "'databases' in group_names"
+
+    - name: Ensure MySQL is started and enabled on database servers
+      service:
+        name: mysqld
+        state: started
+        enabled: yes
+      when: "'databases' in group_names"
+

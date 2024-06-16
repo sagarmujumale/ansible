@@ -1,0 +1,132 @@
+# Playbook: install_services.yml
+
+- name: Install httpd on webservers and mysql on database servers
+  hosts: production
+  become: yes
+  tasks:
+    - name: Install httpd on webservers
+      yum:
+        name: httpd
+        state: present
+      when: "'webservers' in group_names"
+
+    - name: Ensure httpd is started and enabled on webservers
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+      when: "'webservers' in group_names"
+
+    - name: Install MySQL on database servers
+      yum:
+        name: mysql-server
+        state: present
+      when: "'databases' in group_names"
+
+    - name: Ensure MySQL is started and enabled on database servers
+      service:
+        name: mysqld
+        state: started
+        enabled: yes
+      when: "'databases' in group_names"
+
+    - name: Install PHP and MySQL driver
+      yum:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - php
+        - php-mysqlnd
+      when: "'webservers' in group_names"
+
+    - name: Install MySQL development package
+      yum:
+        name: mysql-devel
+        state: present
+      when: "'databases' in group_names"
+
+    - name: Install gcc
+      yum:
+        name: gcc
+        state: present
+      when: "'databases' in group_names"
+
+    - name: Install python3-devel
+      yum:
+        name: python3-devel
+        state: present
+      when: "'databases' in group_names"
+
+    - name: Install pip for Python 3
+      yum:
+        name: python3-pip
+        state: present
+      when: "'databases' in group_names"
+
+    - name: Install mysqlclient Python module
+      pip:
+        name: mysqlclient
+        state: present
+      when: "'databases' in group_names"
+
+    - name: Copy PHP script to create sample website
+      copy:
+        src: sample_website.php
+        dest: /var/www/html/index.php
+        owner: apache
+        group: apache
+        mode: "0644"
+      when: "'webservers' in group_names"
+
+    - name: Ensure MySQL is secured
+      mysql_user:
+        name: root
+        password: "{{ mysql_root_password }}"
+        host: "{{ ansible_hostname }}"
+        login_user: root
+        login_password: ""
+        login_host: localhost
+        state: present
+      when: "'databases' in group_names"
+
+    - name: Create MySQL database and user
+      mysql_db:
+        name: students_db
+        state: present
+      when: "'databases' in group_names"
+
+    - name: Create MySQL user for the sample website
+      shell: mysql -u root -p {{ mysql_root_password }} -e "CREATE USER 'sample_user'@'%' IDENTIFIED BY '{{ sample_user_password }}'; GRANT ALL PRIVILEGES ON students_db.* TO 'sample_user'@'%';"
+      ignore_errors: yes  # Ignore errors if the user already exists
+      when: "'databases' in group_names"
+
+    # Grant access to sample_user from server2.sagar.com
+    - name: Grant access to sample_user from server2.sagar.com
+      mysql_user:
+        name: sample_user
+        priv: "students_db.*:ALL"
+        host: "server2.sagar.com"
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+        login_host: "{{ ansible_hostname }}"
+        state: present
+      when: "'databases' in group_names"
+
+    # Grant access to sample_user from localhost as a fallback option
+    - name: Grant access to sample_user from localhost
+      mysql_user:
+        name: sample_user
+        priv: "students_db.*:ALL"
+        host: "localhost"
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+        login_host: "{{ ansible_hostname }}"
+        state: present
+      when: "'databases' in group_names"
+
+    - name: Restart httpd service
+      service:
+        name: httpd
+        state: restarted
+      when: "'webservers' in group_names"
+
