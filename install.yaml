@@ -4,7 +4,7 @@
   hosts: production
   become: yes
   become_user: "{{ ansible_become_user }}"
-  vars_prompt:
+  vars:
     ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
   tasks:
     - name: Install httpd on webservers
