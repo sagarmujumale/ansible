@@ -1,4 +1,4 @@
-dnf install docker
+dnf install docker -y
 
 systemctl start docker
 
