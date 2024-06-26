@@ -2,7 +2,7 @@
 
 # Install EPEL release and Nagios
 dnf -y install epel-release
-dnf -y install nagios nagios-plugins-all httpd
+dnf -y install nagios 
 
 # Modify Apache configuration for Nagios
 sed -i '/^[^#]*Require all granted/s/^/#/' /etc/httpd/conf.d/nagios.conf
