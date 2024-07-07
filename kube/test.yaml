@@ -1,0 +1,202 @@
+---
+- name: Kubernetes Cluster Setup
+  hosts: all
+  become: yes
+  vars:
+    kube_version: "1.29"
+    pod_cidr: "10.244.0.0/16"
+  tasks:
+    - name: Ensure overlay and br_netfilter modules are loaded at boot
+      copy:
+        dest: /etc/modules-load.d/k8s.conf
+        content: |
+          overlay
+          br_netfilter
+
+    - name: Load overlay module
+      modprobe:
+        name: overlay
+
+    - name: Load br_netfilter module
+      modprobe:
+        name: br_netfilter
+
+    - name: Configure sysctl for Kubernetes
+      copy:
+        dest: /etc/sysctl.d/k8s.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables  = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward                 = 1
+
+    - name: Apply sysctl settings
+      command: sysctl --system
+
+    - name: Disable swap
+      command: swapoff -a
+
+    - name: Remove swap entry from fstab
+      replace:
+        path: /etc/fstab
+        regexp: '^\s*([^#\s]+)\s+swap\s'
+        replace: '# \1 swap'
+
+    - name: Set SELinux to permissive mode
+      command: setenforce 0
+
+    - name: Update SELinux config to permissive
+      replace:
+        path: /etc/selinux/config
+        regexp: '^SELINUX=enforcing'
+        replace: 'SELINUX=permissive'
+
+    - name: Add Kubernetes repository
+      copy:
+        dest: /etc/yum.repos.d/kubernetes.repo
+        content: |
+          [kubernetes]
+          name=Kubernetes
+          baseurl=https://pkgs.k8s.io/core:/stable:/v1.30/rpm/
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://pkgs.k8s.io/core:/stable:/v1.30/rpm/repodata/repomd.xml.key
+          exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+
+    - name: Install Kubernetes components
+      yum:
+        name: "{{ item }}"
+        state: present
+        disable_excludes: kubernetes
+      with_items:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Enable and start kubelet
+      systemd:
+        name: kubelet
+        enabled: yes
+        state: started
+
+    - name: Add CRI-O repositories
+      shell: |
+        curl -L -o /etc/yum.repos.d/devel:kubic:libcontainers:stable.repo https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable/CentOS_8/devel:kubic:libcontainers:stable.repo
+        curl -L -o /etc/yum.repos.d/devel:kubic:libcontainers:stable:cri-o:{{ kube_version }}.repo https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:{{ kube_version }}/CentOS_8/devel:kubic:libcontainers:stable:cri-o:{{ kube_version }}.repo
+      args:
+        executable: /bin/bash
+
+    - name: Install CRI-O and cri-tools
+      yum:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - cri-o
+        - cri-tools
+
+    - name: Enable and start CRI-O
+      systemd:
+        name: crio
+        enabled: yes
+        state: started
+
+    - name: Update /etc/hosts file with inventory data
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ hostvars[item].ansible_host }} {{ item }}"
+      with_items: "{{ groups['all'] }}"
+      become: yes
+
+    - name: Ensure firewalld is running
+      service:
+        name: firewalld
+        state: stopped
+        enabled: no
+
+- hosts: masters[0]
+  become: yes
+  vars:
+    kube_version: "1.29"
+    pod_cidr: "10.244.0.0/16"
+    ip_address: "{{ hostvars[inventory_hostname].ansible_host }}"
+    node_name: "{{ inventory_hostname }}"
+  tasks:
+    - name: Initialize Kubernetes master
+      shell: |
+        kubeadm init --apiserver-advertise-address={{ ip_address }} --apiserver-cert-extra-sans={{ ip_address }} --pod-network-cidr={{ pod_cidr }} --node-name={{ node_name }} --ignore-preflight-errors Swap
+      args:
+        executable: /bin/bash
+
+    - name: Setup kube config for master
+      shell: |
+        mkdir -p $HOME/.kube
+        cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+        chown $(id -u):$(id -g) $HOME/.kube/config
+      args:
+        executable: /bin/bash
+
+    - name: Generate join command for worker nodes
+      shell: kubeadm token create --print-join-command
+      register: join_command
+
+    - name: Save join command to file
+      copy:
+        content: "{{ join_command.stdout }}"
+        dest: /tmp/join_command.sh
+        mode: '0755'
+
+    - name: Fetch file from remote host
+      fetch:
+        src: /tmp/join_command.sh
+        dest: /tmp/join_command.sh
+        flat: yes
+      delegate_to: localhost
+
+- hosts: workers
+  become: yes
+  tasks:
+    - name: Copy join command from master
+      fetch:
+        src: /tmp/join_command.sh
+        dest: /tmp/join_command.sh
+        flat: yes
+
+    - name: Join worker to the cluster
+      shell: /tmp/join_command.sh
+      args:
+        executable: /bin/bash
+
+- name: Install Cilium CLI
+  hosts: all
+  become: yes
+  tasks:
+    - name: Download and install Cilium CLI
+      shell: |
+        CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+        CLI_ARCH=amd64
+        if [ "$(uname -m)" = "aarch64" ]; then CLI_ARCH=arm64; fi
+        curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
+        sha256sum --check cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
+        tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
+        rm cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
+      args:
+        executable: /bin/bash
+
+    - name: Install Cilium
+      shell: cilium install --version 1.14.2 --set kubeProxyReplacement=true --set ingressController.enabled=true --set ingressController.loadbalancerMode=dedicated
+      args:
+        executable: /bin/bash
+
+- name: Install Helm and MetalLB
+  hosts: masters
+  become: yes
+  tasks:
+    - name: Install Helm
+      shell: curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        executable: /bin/bash
+
+    - name: Install MetalLB using Helm
+      shell: helm install metallb metallb/metallb -n metallb-system
+      args:
+        executable: /bin/bash
+
