@@ -1,0 +1,36 @@
+# Use the official Jenkins base image
+FROM jenkins/jenkins:lts
+
+# Switch to root user to install packages
+USER root
+
+# Install necessary packages
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    apt-add-repository --yes --update ppa:ansible/ansible && \
+    apt-get install -y ansible curl
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl
+
+# Create .kube directory and copy config file
+RUN mkdir -p /var/jenkins_home/.kube
+COPY config /var/jenkins_home/.kube/config
+
+# Set appropriate permissions
+RUN chown -R jenkins:jenkins /var/jenkins_home/.kube
+
+# Switch back to the Jenkins user
+USER jenkins
+
+# Expose the Jenkins port
+EXPOSE 8080
+
+# Expose the Jenkins agent port
+EXPOSE 50000
+
+# Define the entry point for the container
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/jenkins.sh"]
+
